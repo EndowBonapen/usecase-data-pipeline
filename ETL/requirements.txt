@@ -1,0 +1,5 @@
+httpx
+typer
+pyarrow
+google-cloud-bigquery
+python-dotenv

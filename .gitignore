@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Airflow
+airflow_home/
+
+# Landed raw data snapshots
+ETL/raw/*
+ELT/raw/*
+!**/raw/.gitkeep
+
+# Secrets
+.env
+*.json
+!*.example.json
+
+# dbt
+target/
+dbt_packages/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs - keep only README tracked, everything else is working notes
+*.md
+!README.md
