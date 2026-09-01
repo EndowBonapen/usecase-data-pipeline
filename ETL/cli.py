@@ -3,20 +3,26 @@ import json
 from pathlib import Path
 
 import typer
+from google.cloud import bigquery
 
+from config import BQ_DATASET_MARTS, BQ_DATASET_RAW, GCP_PROJECT_ID
 from extract.inventory import fetch_inventory_batches
 from extract.land import land_raw
 from extract.relational_seed import fetch_relational_seed_batches
 from extract.returns import fetch_returns_batches
 from extract.transactions import fetch_transactions_batches
+from load.bigquery import load_table
+from load.marts import build_marts
 from transform.clean import cast_money_columns, validate
 from transform.flatten import FLATTENERS
 
 app = typer.Typer(help="E-commerce data platform ETL CLI")
 extract_app = typer.Typer(help="Extract raw data from randomapi.dev")
 transform_app = typer.Typer(help="Transform landed raw data")
+load_app = typer.Typer(help="Load transformed data into BigQuery")
 app.add_typer(extract_app, name="extract")
 app.add_typer(transform_app, name="transform")
+app.add_typer(load_app, name="load")
 
 
 def _land_and_report(source: str, results: list[dict]) -> None:
@@ -175,6 +181,49 @@ def transform_clean(file: Path) -> None:
     for table_name, table in tables.items():
         cleaned = cast_money_columns(table)
         typer.echo(f"{table_name}: {cleaned.num_rows} rows, columns={cleaned.column_names}")
+
+
+@load_app.command("bigquery")
+def load_bigquery(file: Path, write_disposition: str = "WRITE_APPEND") -> None:
+    """Flatten + clean a landed raw file, then load each table into BigQuery.
+
+    Aborts without loading anything if a derived-field check fails — bad data
+    doesn't get promoted (see plan-project.md, data quality gate).
+    """
+    envelope = json.loads(file.read_text(encoding="utf-8"))
+    source = envelope["source"]
+
+    flattener = FLATTENERS.get(source)
+    if flattener is None:
+        raise typer.BadParameter(f"no flattener registered for source '{source}'")
+
+    tables = flattener(envelope["payload"])
+
+    violations = validate(source, tables)
+    if violations:
+        typer.echo(f"Found {len(violations)} validation issue(s), aborting load:")
+        for violation in violations:
+            typer.echo(f"  {violation}")
+        raise typer.Exit(code=1)
+
+    client = bigquery.Client(project=GCP_PROJECT_ID)
+    for table_name, table in tables.items():
+        cleaned = cast_money_columns(table)
+        job = load_table(client, cleaned, table_name, write_disposition=write_disposition)
+        typer.echo(
+            f"{table_name}: loaded {job.output_rows} rows -> "
+            f"{GCP_PROJECT_ID}.{BQ_DATASET_RAW}.{table_name}"
+        )
+
+
+@load_app.command("marts")
+def load_marts() -> None:
+    """Build the Phase 1 marts (dim/fact) from the cleaned relational_seed
+    tables already loaded into raw_ecommerce."""
+    client = bigquery.Client(project=GCP_PROJECT_ID)
+    row_counts = build_marts(client)
+    for table_name, count in row_counts.items():
+        typer.echo(f"{table_name}: {count} rows -> {GCP_PROJECT_ID}.{BQ_DATASET_MARTS}.{table_name}")
 
 
 if __name__ == "__main__":
