@@ -184,7 +184,7 @@ def transform_clean(file: Path) -> None:
 
 
 @load_app.command("bigquery")
-def load_bigquery(file: Path, write_disposition: str = "WRITE_APPEND") -> None:
+def load_bigquery(file: Path, write_disposition: str = "WRITE_TRUNCATE") -> None:
     """Flatten + clean a landed raw file, then load each table into BigQuery.
 
     Aborts without loading anything if a derived-field check fails — bad data
