@@ -25,6 +25,7 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Docs - keep only README tracked, everything else is working notes
+# Docs - keep README + every docs/ folder tracked, root-level *.md elsewhere are working notes
 *.md
 !README.md
+!**/docs/**/*.md

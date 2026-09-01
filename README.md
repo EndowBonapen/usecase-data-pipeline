@@ -1,16 +1,17 @@
 # usecase-data-pipeline
 
-Latihan data engineering end-to-end: dua paradigma, satu data source.
+Trying out ETL and ELT for real ☕
 
-- **ETL/** — Extract (Open-Meteo API) → Transform (pandas) → Load (Azure SQL Database)
-- **ELT/** — Extract (Open-Meteo API) → Load raw (BigQuery) → Transform (dbt)
+## E-commerce data platform
 
-Kedua pipeline diorkestrasi oleh Apache Airflow (via WSL2 — Airflow tidak jalan native di Windows).
+A multi-source pipeline built from [randomapi.dev](https://randomapi.dev/apis) (relational-seed, transactions, inventory, returns), landed into BigQuery and modeled as a star schema.
 
-Data: cuaca harian 5 kota (Jakarta, Surabaya, Bandung, Medan, Makassar) dari [Open-Meteo](https://open-meteo.com/) (gratis, tanpa API key).
+**Phase 1 (ETL)** is done: async extract → land raw JSON → flatten/clean/cast in Python → load into BigQuery → build the Phase 1 marts (dim/fact). Orchestrated by an Airflow DAG via docker-compose.
 
-Lihat progres & panduan step-by-step di masing-masing folder.
+**Phase 2 (ELT)**, where dbt takes over the transform step inside the warehouse, hasn't started yet.
 
-## Use case 2 — E-commerce Data Platform (planning)
-
-Multi-source pipeline (orders, transactions, inventory, returns) dari [randomapi.dev](https://randomapi.dev/apis), dengan star schema multi-fact. Masih tahap desain — lihat [plan-project.md](plan-project.md).
+Docs:
+- [ETL/docs/01-architecture.md](ETL/docs/01-architecture.md) — data sources, why multi-source is harder than it looks, dimensional model
+- [ETL/docs/02-how-to-run.md](ETL/docs/02-how-to-run.md) — setup and how to run it
+- [ETL/docs/03-code-architecture.md](ETL/docs/03-code-architecture.md) — why the code is structured the way it is
+- [airflow/docs/01-dag-reference.md](airflow/docs/01-dag-reference.md) — how to run the DAG, what each task does, what happens if one fails
