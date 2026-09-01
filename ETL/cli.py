@@ -13,6 +13,7 @@ from extract.returns import fetch_returns_batches
 from extract.transactions import fetch_transactions_batches
 from load.bigquery import load_table
 from load.marts import build_marts
+from load.pipeline import ValidationError, load_envelope_file, load_source_date
 from transform.clean import cast_money_columns, validate
 from transform.flatten import FLATTENERS
 
@@ -185,26 +186,20 @@ def transform_clean(file: Path) -> None:
 
 @load_app.command("bigquery")
 def load_bigquery(file: Path, write_disposition: str = "WRITE_TRUNCATE") -> None:
-    """Flatten + clean a landed raw file, then load each table into BigQuery.
+    """Flatten + clean a single landed raw file, then load each table into BigQuery.
 
     Aborts without loading anything if a derived-field check fails — bad data
-    doesn't get promoted (see plan-project.md, data quality gate).
+    doesn't get promoted (see plan-project.md, data quality gate). Manual/ad
+    hoc use — Airflow calls `load bigquery-all` instead (see below), since it
+    doesn't know the exact landed filename, only the source and date.
     """
-    envelope = json.loads(file.read_text(encoding="utf-8"))
-    source = envelope["source"]
-
-    flattener = FLATTENERS.get(source)
-    if flattener is None:
-        raise typer.BadParameter(f"no flattener registered for source '{source}'")
-
-    tables = flattener(envelope["payload"])
-
-    violations = validate(source, tables)
-    if violations:
-        typer.echo(f"Found {len(violations)} validation issue(s), aborting load:")
-        for violation in violations:
+    try:
+        source, tables = load_envelope_file(file)
+    except ValidationError as exc:
+        typer.echo(f"Found {len(exc.violations)} validation issue(s), aborting load:")
+        for violation in exc.violations:
             typer.echo(f"  {violation}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     client = bigquery.Client(project=GCP_PROJECT_ID)
     for table_name, table in tables.items():
@@ -214,6 +209,28 @@ def load_bigquery(file: Path, write_disposition: str = "WRITE_TRUNCATE") -> None
             f"{table_name}: loaded {job.output_rows} rows -> "
             f"{GCP_PROJECT_ID}.{BQ_DATASET_RAW}.{table_name}"
         )
+
+
+@load_app.command("bigquery-all")
+def load_bigquery_all(source: str, date: str) -> None:
+    """Load every file landed for `source` on `date` (raw/{source}/{date}/*.json).
+
+    Batches from the same day are concatenated per table before a single
+    WRITE_TRUNCATE load — this is the command Airflow's load_* tasks call,
+    since a DAG only knows the execution date, not the exact filename an
+    extract task happened to generate.
+    """
+    client = bigquery.Client(project=GCP_PROJECT_ID)
+    try:
+        row_counts = load_source_date(client, source, date)
+    except ValidationError as exc:
+        typer.echo(f"Found {len(exc.violations)} validation issue(s), aborting load:")
+        for violation in exc.violations:
+            typer.echo(f"  {violation}")
+        raise typer.Exit(code=1) from exc
+
+    for table_name, count in row_counts.items():
+        typer.echo(f"{table_name}: loaded {count} rows -> {GCP_PROJECT_ID}.{BQ_DATASET_RAW}.{table_name}")
 
 
 @load_app.command("marts")
