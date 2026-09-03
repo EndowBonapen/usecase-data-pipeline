@@ -11,9 +11,9 @@ cd airflow
 docker-compose up
 ```
 
-First run builds the image (installs `ETL/requirements.txt` into `apache/airflow:2.10.4-python3.11`) and runs `airflow-init` (DB migration + creates an `admin`/`admin` user) before the webserver/scheduler start. Once up, the UI is at `localhost:8080`.
+First run builds the image (installs both `ETL/requirements.txt` and `ELT/requirements.txt`, including `dbt-bigquery`, into `apache/airflow:2.10.4-python3.11` — one Airflow instance runs both DAGs, so both dependency sets have to coexist in the same image) and runs `airflow-init` (DB migration + creates an `admin`/`admin` user) before the webserver/scheduler start. Once up, the UI is at `localhost:8080`.
 
-`ETL/.env` and `ETL/service-account.json` are picked up automatically — the whole `ETL/` folder is mounted into the container at `/opt/airflow/etl`, and `GOOGLE_APPLICATION_CREDENTIALS` is overridden in `docker-compose.yaml` to point at the in-container path (the value in `.env` is a Windows host path, which wouldn't resolve inside the container).
+`ETL/.env`/`ETL/service-account.json` and `ELT/.env` are picked up automatically — both folders are mounted into the container (`/opt/airflow/etl`, `/opt/airflow/elt`), and `GOOGLE_APPLICATION_CREDENTIALS` is overridden in `docker-compose.yaml` to point at the in-container path (the value baked into each `.env` is a Windows host path, which wouldn't resolve inside the container). The `ecommerce_elt_phase2` DAG's `dbt_build` task also needs a dbt profile — that's `airflow/dbt_profiles/profiles.yml` (env_var()-driven, committed — separate from `ELT/dbt/profiles.yml`, which is gitignored and has literal values for local dev).
 
 To stop: `docker-compose down`. Add `-v` to also drop the Postgres metadata volume (full reset, including DAG run history).
 
@@ -51,3 +51,28 @@ extract_returns         → load_returns          ─┘
 - No alerting beyond the Airflow UI itself — a failed run doesn't page/email/Slack anyone yet. `on_failure_callback` would be the place to add that.
 - No Airflow **Pool** limiting concurrent API calls — the 4 `extract_*` tasks run in parallel and could, in principle, collectively exceed the 60 req/60s rate limit faster than any single source's own retry-on-429 logic accounts for. Hasn't caused a problem in manual testing (each extract is a handful of requests), but would matter at higher `--batches` values.
 - Not yet tested end-to-end (see status note at the top).
+
+## DAG: `ecommerce_elt_phase2`
+
+Same schedule and `max_active_runs=1` as Phase 1. Structurally simpler — no equivalent to `build_marts`/`verify_load` as separate tasks, because `dbt build` already does staging → intermediate → marts → all 34 tests as one gated unit.
+
+```
+extract_relational_seed → load_raw_relational_seed ─┐
+extract_transactions    → load_raw_transactions     ─┤
+extract_inventory       → load_raw_inventory        ─┼→ dbt_build
+extract_returns         → load_raw_returns          ─┘
+```
+
+### Task-by-task
+
+| Task | What it does | Depends on | If it fails |
+|---|---|---|---|
+| `extract_<source>` | Same as Phase 1's `extract_<source>`, but calls ELT's own copy of the fetch functions and lands to `ELT/raw/{source}/{ds}/` (a separate raw zone from `ETL/raw/`). | — | Same retry behavior as Phase 1. |
+| `load_raw_<source>` | Calls `load_raw_source_date()` directly: reads every file landed for `(source, ds)`, loads each table into `elt_raw_ecommerce` **as-is** — no flatten/cast in Python. Nested objects/arrays become native BigQuery STRUCT/ARRAY columns for dbt to `UNNEST()`. | `extract_<source>` | If BigQuery load itself errors (schema autodetect issue, quota, auth), retries twice. There's no business-rule validation at this stage (contrast Phase 1) — that's dbt's job, downstream. |
+| `dbt_build` | Shells out to `dbt build --project-dir .../ELT/dbt --profiles-dir .../dbt_profiles` — runs every staging/intermediate/marts model plus all 34 tests in dependency order. | every `load_raw_*` | If any model fails to build (SQL error) or any test fails (a `unique`/`relationships`/`accepted_values`/custom singular test), `dbt build`'s own exit code is non-zero, which raises in the task. The log (captured via `subprocess.run`) has dbt's own output — same as running `dbt build` locally, including which specific model or test failed. Models built *before* the failure keep their new state (dbt doesn't roll back earlier models in the same run); ones after it don't get rebuilt. |
+
+### Diagnosing a failed run
+
+1. **`extract_*` failed** — same as Phase 1: check for a 429/rate-limit that outlasted the retry budget.
+2. **`load_raw_*` failed** — almost certainly a BigQuery load error (check the task log for the actual API error), not a data-shape problem — there's no flatten step here to get wrong.
+3. **`dbt_build` failed** — the task log **is** the `dbt build` output. Scroll to the first `ERROR` or `FAIL`: a model error names the `.sql` file and the BigQuery error message; a test failure names the specific test (e.g. `relationships_fact_returns_product_id__product_id__ref_dim_product_`) — cross-reference against `ELT/dbt/models/marts/_marts.yml` or `ELT/dbt/tests/` to see what it's asserting.

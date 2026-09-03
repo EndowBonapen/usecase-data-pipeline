@@ -20,9 +20,13 @@ ELT/raw/*
 target/
 dbt_packages/
 logs/
-profiles.yml
-!profiles.yml.example
 .user.yml
+
+# Local dbt profile (per-machine, has literal project/keyfile values) —
+# airflow/dbt_profiles/profiles.yml is different: env_var()-driven, no
+# secrets baked in, meant to be committed.
+ELT/dbt/profiles.yml
+!ELT/dbt/profiles.yml.example
 
 # OS
 .DS_Store
