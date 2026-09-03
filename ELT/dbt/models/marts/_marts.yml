@@ -1,0 +1,124 @@
+version: 2
+
+models:
+  - name: dim_category
+    columns:
+      - name: category_id
+        tests: [unique, not_null]
+
+  - name: dim_product
+    columns:
+      - name: product_id
+        tests: [unique, not_null]
+      - name: category_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_category')
+                field: category_id
+
+  - name: dim_customer
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+
+  - name: dim_warehouse
+    columns:
+      - name: warehouse_id
+        tests: [unique, not_null]
+
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [unique, not_null]
+
+  - name: fact_orders
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['cancelled', 'paid', 'pending', 'shipped', 'delivered', 'processing']
+
+  - name: fact_order_items
+    columns:
+      - name: order_item_id
+        tests: [unique, not_null]
+      - name: order_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('fact_orders')
+                field: order_id
+      - name: product_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+
+  - name: fact_transactions
+    columns:
+      - name: transaction_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: transaction_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['payment', 'refund', 'withdrawal', 'transfer', 'deposit']
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['completed', 'pending', 'failed']
+
+  - name: fact_returns
+    columns:
+      - name: customer_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: product_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['requested', 'approved', 'inTransit', 'received', 'refunded', 'rejected', 'cancelled']
+
+  - name: fact_inventory_snapshot
+    columns:
+      - name: inventory_id
+        tests: [unique, not_null]
+      - name: product_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+      - name: warehouse_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_warehouse')
+                field: warehouse_id

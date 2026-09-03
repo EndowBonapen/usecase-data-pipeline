@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: raw
+    database: etl-data-engineering-506716
+    schema: elt_raw_ecommerce
+    tables:
+      - name: categories
+      - name: products
+      - name: customers
+      - name: orders
+      - name: order_items
+      - name: transactions
+      - name: inventory
+      - name: returns

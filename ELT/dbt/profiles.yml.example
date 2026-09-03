@@ -1,0 +1,11 @@
+ecommerce_elt:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: your-bigquery-sandbox-project-id
+      dataset: elt_raw_ecommerce
+      keyfile: /absolute/path/to/service-account.json
+      threads: 4
+      location: US
