@@ -1,0 +1,5 @@
+httpx
+typer
+google-cloud-bigquery
+python-dotenv
+dbt-bigquery

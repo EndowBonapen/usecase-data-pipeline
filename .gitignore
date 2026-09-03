@@ -20,6 +20,9 @@ ELT/raw/*
 target/
 dbt_packages/
 logs/
+profiles.yml
+!profiles.yml.example
+.user.yml
 
 # OS
 .DS_Store
